@@ -1,5 +1,5 @@
 /env
-.gradio/flagged
+.gradio
 __pycache__
 .DS_Store
 
