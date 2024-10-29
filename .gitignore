@@ -1,4 +1,6 @@
 /env
 .gradio/flagged
 __pycache__
+images.jpeg
+.DS_Store
 
