@@ -2,4 +2,7 @@
 .gradio
 __pycache__
 .DS_Store
+test.py
+offload
+config.py
 
