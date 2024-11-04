@@ -1,6 +1,6 @@
-import torch
+# import torch
 import warnings
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 from happytransformer import HappyTextToText, TTSettings
 from styleformer import Styleformer
 from sentence_transformers import SentenceTransformer
@@ -8,11 +8,9 @@ import chromadb
 import pandas as pd
 import logging
 import re
-# from huggingface_hub import login
-# login()
+from threading import Thread
 
 warnings.filterwarnings("ignore")
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
                     format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
@@ -20,7 +18,7 @@ logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
 # For chromadb collection
 MAX_TOKENS = 512
 client = chromadb.Client()
-embedder = SentenceTransformer('all-MiniLM-L6-v2')#.to(device)
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
 collection_name = 'papers'
 
 # For grammar checker
@@ -37,6 +35,7 @@ model = AutoModelForCausalLM.from_pretrained(
     torch_dtype="auto",
     device_map="auto"
 )
+model.generation_config.max_new_tokens = 2048
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # from nltk import sent_tokenize
@@ -154,7 +153,7 @@ def fix_academic_style(informal_text: str) -> str:
 
     return formal_text
 
-def generate_article(initial_text: str, parts: list) -> str:
+def _chat_stream(initial_text: str, parts: list):
     logging.info(f"\n---Generate Article input:---\n{initial_text}")
     parts = ", ".join(parts).lower()
 
@@ -177,34 +176,96 @@ def generate_article(initial_text: str, parts: list) -> str:
                                 discussion, conclusion, or full text), 'context' - the similar article 
                                 the structure of which can be used as a base for the text (it can be empty
                                 in case of absence of similar papers in the database.). The output should be
-                                only generated article (or parts of it)."""},
+                                only generated article (or parts of it). The responce must be provided as a text."""},
     {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
     ]
-    text = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=True
+    input_text = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=False,
     )
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-    generated_ids = model.generate(
-        **model_inputs,
-        max_new_tokens=512
+    inputs = tokenizer([input_text], return_tensors="pt").to(model.device)
+    streamer = TextIteratorStreamer(
+        tokenizer=tokenizer, skip_prompt=True, timeout=60.0, skip_special_tokens=True
     )
-    generated_ids = [
-        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-    ]
+    generation_kwargs = {
+        **inputs,
+        "streamer": streamer,
+    }
+    thread = Thread(target=model.generate, kwargs=generation_kwargs)
+    thread.start()
 
-    response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    logging.info("The text was generated!")
-    return response
+    response = ""
+    for new_text in streamer:
+        response += new_text
+        yield response
+
+def predict(goal: str, parts: list, context: str):
+        # print(f"User: {_query}")
+        if goal == 'Check Academic Style':
+            yield fix_academic_style(context)
+        elif goal == 'Check Grammar':
+            yield fix_grammar(context)
+        else:
+            full_response = ""
+            for new_text in _chat_stream(context, parts):
+                full_response = new_text
+                yield full_response
+
+            logging.info(f"\nThe text was generated!\n{full_response}")
+
+
+# def generate_article(initial_text: str, parts: list) -> str:
+#     logging.info(f"\n---Generate Article input:---\n{initial_text}")
+#     parts = ", ".join(parts).lower()
+
+#     text_embedding = embedder.encode([initial_text])
+#     chroma_collection = get_collection()
+#     results = chroma_collection.query(
+#         query_embeddings=text_embedding,
+#         n_results=1
+#     )
+#     context = results['documents'][0] if results['documents'] else ""
+#     if context == "":
+#         logging.warning(f"COLLECTION QUERY: No context was found in the database!")
+
+#     messages = [
+#     {"role": "system", "content": """You are helpful Academic Research Assistant which helps to generate 
+#                                 necessary parts of the reserch based on the provided context.
+#                                 The context is the following: 'written text' - this is the text that user
+#                                 has for now and want to complete, 'parts' - those are the parts of paper 
+#                                 user needs to complete (it could be the abstract, introduction, methodology,
+#                                 discussion, conclusion, or full text), 'context' - the similar article 
+#                                 the structure of which can be used as a base for the text (it can be empty
+#                                 in case of absence of similar papers in the database.). The output should be
+#                                 only generated article (or parts of it). The responce must be provided as a text."""},
+#     {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
+#     ]
+#     text = tokenizer.apply_chat_template(
+#     messages,
+#     tokenize=False,
+#     add_generation_prompt=True
+#     )
+#     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+#     generated_ids = model.generate(
+#         **model_inputs,
+#         max_new_tokens=512
+#     )
+#     generated_ids = [
+#         output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+#     ]
+
+#     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+#     logging.info("The text was generated!")
+#     return response
     
-def handle_user_prompt(goal: str, parts: list, context: str) -> str:
-    if goal == 'Check Academic Style':
-        return fix_academic_style(context)
-    elif goal == 'Check Grammar':
-        return fix_grammar(context)
-    elif goal == 'Write Text (Part)':
-        return generate_article(context, parts)
+# def handle_user_prompt(goal: str, parts: list, context: str) -> str:
+#     if goal == 'Check Academic Style':
+#         return fix_academic_style(context)
+#     elif goal == 'Check Grammar':
+#         return fix_grammar(context)
+#     elif goal == 'Write Text (Part)':
+#         return generate_article(context, parts)
     
     
