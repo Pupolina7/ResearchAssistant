@@ -1,6 +1,5 @@
 import torch
 import warnings
-from transformers import LlamaTokenizer, LlamaForCausalLM, pipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from happytransformer import HappyTextToText, TTSettings
 from styleformer import Styleformer
@@ -9,11 +8,11 @@ import chromadb
 import pandas as pd
 import logging
 import re
-from huggingface_hub import login
-login()
+# from huggingface_hub import login
+# login()
 
 warnings.filterwarnings("ignore")
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
                     format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
@@ -21,7 +20,7 @@ logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
 # For chromadb collection
 MAX_TOKENS = 512
 client = chromadb.Client()
-embedder = SentenceTransformer('all-MiniLM-L6-v2').to(device)
+embedder = SentenceTransformer('all-MiniLM-L6-v2')#.to(device)
 collection_name = 'papers'
 
 # For grammar checker
@@ -31,13 +30,14 @@ happy_tt = HappyTextToText("T5", "vennify/t5-base-grammar-correction")
 sf = Styleformer(style=0) 
 
 # For text generation
-# llama_model_path = 'openlm-research/open_llama_3b'
-# llama_tokenizer = LlamaTokenizer.from_pretrained(llama_model_path)
-# llama_model = LlamaForCausalLM.from_pretrained(llama_model_path, torch_dtype=torch.float16).to(device)
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", pad_token_id=tokenizer.eos_token_id)
-generation = pipeline(task="text-generation", model=model, tokenizer=tokenizer)
-# model.generation_config.pad_token_id = tokenizer.pad_token_id
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype="auto",
+    device_map="auto"
+)
+tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # from nltk import sent_tokenize
 
@@ -180,40 +180,24 @@ def generate_article(initial_text: str, parts: list) -> str:
                                 only generated article (or parts of it)."""},
     {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
     ]
-    outputs = generation(
-        messages,
-        max_new_tokens=512,
+    text = tokenizer.apply_chat_template(
+    messages,
+    tokenize=False,
+    add_generation_prompt=True
     )
-    answer = outputs[0]["generated_text"][-1]
+    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+    generated_ids = model.generate(
+        **model_inputs,
+        max_new_tokens=512
+    )
+    generated_ids = [
+        output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+    ]
+
+    response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
     logging.info("The text was generated!")
-    return answer
-
-    # logging.info(f"\n---Generate Article input:---\n{initial_text}")
-    # parts = ", ".join(parts)
-    # text_embedding = embedder.encode([initial_text])
-    # chroma_collection = get_collection()
-    # results = chroma_collection.query(
-    #     query_embeddings=text_embedding,
-    #     n_results=1
-    # )
-    # context = results['documents'][0] if results['documents'] else ""
-    # if context == "":
-    #     logging.warning(f"COLLECTION QUERY:No context was found in the database!")
-    
-    # prompt = f"""Q: You are helpful Research Assistant which helps to generate necessary aprts of the reserch
-    #             for students. Based on the following text already written: {initial_text}, complete {parts}
-    #             of the research. Use the format of the similar article to preserve the correct structure: 
-    #             {context if context else 'No additional articles found.'}\nA:"""
-    # input_ids = llama_tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-
-    # with torch.no_grad():
-    #     generation_output = llama_model.generate(input_ids=input_ids, max_new_tokens=512, 
-    #                                              eos_token_id=llama_tokenizer.eos_token_id)
-    
-    # output_text = llama_tokenizer.decode(generation_output[0], skip_special_tokens=True)
-    # answer = output_text.split("A:")[1].strip() if "A:" in output_text else output_text.strip()
-    # logging.info("The text was generated!")
-    # return answer
+    return response
     
 def handle_user_prompt(goal: str, parts: list, context: str) -> str:
     if goal == 'Check Academic Style':

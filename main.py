@@ -2,7 +2,6 @@ import gradio as gr
 from functionality import handle_user_prompt, get_collection
 
 def read_file(file):
-    # Read the file content
     if file is not None:
         with open(file.name, 'r') as f:
             file_data = f.read()
