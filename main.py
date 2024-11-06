@@ -9,28 +9,34 @@ def read_file(file):
     else:
         return None
 
-with gr.Blocks() as demo:
+with gr.Blocks(css=".no-scroll { overflow-y: hidden; }") as demo:
     gr.Markdown("# **📝 AI-powered Academic Research Assistant 📝**")
-    gr.Markdown("### 🗒️ Description for AI-powered Academic Research Assistant")
+    gr.Markdown("""**AI-powered Academic Research Assistant** is a tool which helps to 
+                ensure the *correct grammar* and *academic style* in the scientific papers.
 
-    gr.Markdown('📎 Write the text you what to expand or upload corresponding text file.')
+                It also could help with *writing needed parts* or *proposing possible ideas*
+                for describing what you want in appropriate way.
+
+                ## 📥 Down bellow you should choose appropriate parameters for your goals and then wait a little for the responce!""")
+
+    gr.Markdown('📨 Write the text you what to expand or upload corresponding text file.')
 
     with gr.Tab('Write Text 📖'):
         input_prompt = gr.Textbox(label='Initial Text 📝',
                             placeholder='Write here your research text!',
-                            lines=9,)
+                            lines=9,
+                            autoscroll=False)
     with gr.Tab('Upload File 📩'):
-        # file_content = gr.Textbox(visible=False)
-        txt_file = gr.File(file_types=['text','pdf',], label='Upload Text File',)
+        txt_file = gr.File(file_types=['text',], label='Upload Text File',)
         txt_file.change(read_file, inputs=txt_file, outputs=input_prompt)
 
             
     gr.Markdown('✏️ Fill parameters for your needs')
-    with gr.Row(equal_height=True):
+    with gr.Row(variant='panel', equal_height=True):
         request_goal = gr.Radio(label='🤔 Specify the purpose of your request.',
                                 info="Pick one:",
-                                choices=['Check Academic Style', 'Check Grammar', 'Write Text (Part)',],
-                                value='Check Academic Style',)
+                                choices=['Write Text (Part)', 'Check Academic Style', 'Check Grammar', ],
+                                value='Write Text (Part)',)
         
         with gr.Accordion("❗️ In case you need to Write Text (Part) choose appropriate option!", open=False):
             part_to_write = gr.CheckboxGroup(label="""📋 What part for Assistant to write? (here you need to 
@@ -42,14 +48,21 @@ with gr.Blocks() as demo:
     
     with gr.Row(equal_height=True):
         submit_btn = gr.Button('Confirm! ✅')
-        clear_btn = gr.Button('Clear ❌')
+        clear_btn = gr.Button('Clear ❌', min_width=611)
 
     gr.Markdown('##### 📌 Assistant Responce')
+    gr.Markdown("In case you did not satisfy with the responce try to paraphrase!")
     responce = gr.Textbox(label="Generated Text 👨🏼‍💻", 
                           lines=9, 
                           placeholder='Here the generated text will appear!', 
+                          show_label=True,
                           show_copy_button=True,
-                          show_label=True,)
+                          autofocus=True,
+                        #   autoscroll=False,
+                        #   interactive=False,
+                        #   elem_classes=["no-scroll"]
+                          )
+    # focus = gr.Textbox(label = 'Test', autofocus=True)
     
     
     submit_btn.click(fn=predict, 

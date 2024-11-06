@@ -1,4 +1,3 @@
-# import torch
 import warnings
 from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 from happytransformer import HappyTextToText, TTSettings
@@ -9,6 +8,8 @@ import pandas as pd
 import logging
 import re
 from threading import Thread
+import hashlib
+import diskcache as dc
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
@@ -23,9 +24,11 @@ collection_name = 'papers'
 
 # For grammar checker
 happy_tt = HappyTextToText("T5", "vennify/t5-base-grammar-correction")
+grammar_cache = dc.Cache('grammar_cache')
 
 # For academic style checks
 sf = Styleformer(style=0) 
+style_cache = dc.Cache('style_cache')
 
 # For text generation
 model_name = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -37,6 +40,10 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 model.generation_config.max_new_tokens = 2048
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+model_cache = dc.Cache('model_cache')
+
+def generate_key(text):
+    return hashlib.md5(text.encode()).hexdigest()
 
 # from nltk import sent_tokenize
 
@@ -128,77 +135,103 @@ def get_collection() -> chromadb.Collection:
 
 def fix_grammar(text: str) -> str:
     logging.info(f"\n---Fix Grammar input:---\n{text}")
-    args = TTSettings(num_beams=5, min_length=1)
-    try:
-        result = happy_tt.generate_text(f"grammar: {text}", args=args)
-        corrected_text = result.text
-    except Exception as e:
-        logging.error(f"Error correcting grammar: {e}")
-        corrected_text = text
-    logging.info(f"\n---Grammar corrected:---\n{corrected_text}\n")
-    return corrected_text
+    key = generate_key(text)
+    if key in  grammar_cache:
+        logging.info(f"Similar request was found in 'grammar_cache' and retrieved from it!")
+        corrected_text = grammar_cache[key]
+        logging.info(f"\n---Grammar corrected:---\n{corrected_text}\n")
+        return corrected_text
+    else:
+        args = TTSettings(num_beams=5, min_length=1)
+        try:
+            result = happy_tt.generate_text(f"grammar: {text}", args=args)
+            corrected_text = result.text
+            grammar_cache.set(key, corrected_text, expire=86400)
+            logging.info(f"The result was cached in 'grammar_cache'!")
+        except Exception as e:
+            logging.error(f"Error correcting grammar: {e}")
+            corrected_text = text
+        logging.info(f"\n---Grammar corrected:---\n{corrected_text}\n")
+        return corrected_text
 
 def fix_academic_style(informal_text: str) -> str:
     logging.info(f"\n---Fix Academic Style input:---\n{informal_text}")
-    try:
-        formal_text = sf.transfer(informal_text)
-        if formal_text is None:
+    key = generate_key(informal_text)
+    if key in style_cache:
+        logging.info(f"Similar request was found in 'style_cache' and retrieved from it!")
+        formal_text = style_cache[key]
+        logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
+        return formal_text
+    else:
+        try:
+            formal_text = sf.transfer(informal_text)
+            if formal_text is None:
+                formal_text = informal_text
+                logging.warning("---COULD NOT FIX ACADEMIC STYLE!\n")
+            else:
+                style_cache.set(key, formal_text, expire=86400)
+                logging.info(f"The result was cached in 'style_cache'!")
+                logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
+        except Exception as e:
+            logging.error(f"Error in academic style transformation: {e}")
             formal_text = informal_text
-            logging.warning("---COULD NOT FIX ACADEMIC STYLE!\n")
-        else:
-            logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
-    except Exception as e:
-        logging.error(f"Error in academic style transformation: {e}")
-        formal_text = informal_text
 
-    return formal_text
+        return formal_text
 
 def _chat_stream(initial_text: str, parts: list):
     logging.info(f"\n---Generate Article input:---\n{initial_text}")
     parts = ", ".join(parts).lower()
+    for_cache = initial_text + ' ' + parts
+    key = generate_key(for_cache)
+    if key in model_cache:
+        logging.info(f"Similar request was found in 'model_cache' and retrieved from it!")
+        yield model_cache[key]
+    else: 
+        text_embedding = embedder.encode([initial_text])
+        chroma_collection = get_collection()
+        results = chroma_collection.query(
+            query_embeddings=text_embedding,
+            n_results=1
+        )
+        context = results['documents'][0] if results['documents'] else ""
+        if context == "":
+            logging.warning(f"COLLECTION QUERY: No context was found in the database!")
 
-    text_embedding = embedder.encode([initial_text])
-    chroma_collection = get_collection()
-    results = chroma_collection.query(
-        query_embeddings=text_embedding,
-        n_results=1
-    )
-    context = results['documents'][0] if results['documents'] else ""
-    if context == "":
-        logging.warning(f"COLLECTION QUERY: No context was found in the database!")
+        messages = [
+        {"role": "system", "content": """You are helpful Academic Research Assistant which helps to generate 
+                                    necessary parts of the reserch based on the provided context.
+                                    The context is the following: 'written text' - this is the text that user
+                                    has for now and want to complete, 'parts' - those are the parts of paper 
+                                    user needs to complete (it could be the abstract, introduction, methodology,
+                                    discussion, conclusion, or full text), 'context' - the similar article 
+                                    the structure of which can be used as a base for the text (it can be empty
+                                    in case of absence of similar papers in the database.). The output should be
+                                    only generated article (or parts of it). The responce must be provided as a 
+                                    raw text. Be precise and follow the structure of academic papers parts."""},
+        {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
+        ]
+        input_text = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=False,
+        )
+        inputs = tokenizer([input_text], return_tensors="pt").to(model.device)
+        streamer = TextIteratorStreamer(
+            tokenizer=tokenizer, skip_prompt=True, timeout=60.0, skip_special_tokens=True
+        )
+        generation_kwargs = {
+            **inputs,
+            "streamer": streamer,
+        }
+        thread = Thread(target=model.generate, kwargs=generation_kwargs)
+        thread.start()
 
-    messages = [
-    {"role": "system", "content": """You are helpful Academic Research Assistant which helps to generate 
-                                necessary parts of the reserch based on the provided context.
-                                The context is the following: 'written text' - this is the text that user
-                                has for now and want to complete, 'parts' - those are the parts of paper 
-                                user needs to complete (it could be the abstract, introduction, methodology,
-                                discussion, conclusion, or full text), 'context' - the similar article 
-                                the structure of which can be used as a base for the text (it can be empty
-                                in case of absence of similar papers in the database.). The output should be
-                                only generated article (or parts of it). The responce must be provided as a text."""},
-    {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
-    ]
-    input_text = tokenizer.apply_chat_template(
-        messages,
-        add_generation_prompt=True,
-        tokenize=False,
-    )
-    inputs = tokenizer([input_text], return_tensors="pt").to(model.device)
-    streamer = TextIteratorStreamer(
-        tokenizer=tokenizer, skip_prompt=True, timeout=60.0, skip_special_tokens=True
-    )
-    generation_kwargs = {
-        **inputs,
-        "streamer": streamer,
-    }
-    thread = Thread(target=model.generate, kwargs=generation_kwargs)
-    thread.start()
-
-    response = ""
-    for new_text in streamer:
-        response += new_text
-        yield response
+        response = ""
+        for new_text in streamer:
+            response += new_text
+            yield response
+        model_cache.set(key, response, expire=86400)
+        logging.info(f"The result was cached in 'model_cache'!")
 
 def predict(goal: str, parts: list, context: str):
         # print(f"User: {_query}")

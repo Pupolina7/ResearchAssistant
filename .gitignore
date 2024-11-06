@@ -7,3 +7,6 @@ offload
 config.py
 futureImprovements.md
 chat_stream.py
+grammar_cache
+model_cache
+style_cache
