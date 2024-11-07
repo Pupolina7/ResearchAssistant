@@ -17,7 +17,7 @@ The application’s architecture is built to provide fast, reliable, and high-qu
 - [**Qwen2.5 1.5B Instruct**](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct): The main large language model (LLM) used for text generation, capable of producing nuanced and detailed academic content.
 - [**T5 Base Grammar Correction Model**](https://huggingface.co/vennify/t5-base-grammar-correction): Ensures grammatical correctness by identifying and correcting grammar issues in the user's input text.
 - [**Style Transformer**](https://github.com/PrithivirajDamodaran/Styleformer): Preserves and enhances the formal academic style, adapting responses to align with scholarly writing conventions.
-- **RAG (Retrieval-Augmented Generation) System**: A vector database that consists of a carefully curated collection of academic works, which serves as a knowledge base for the LLM. This dataset provides the model with a rich source of context and reference, ensuring responses are both accurate and relevant. ([Base Dataset](https://huggingface.co/datasets/somosnlp-hackathon-2022/scientific_papers_en/viewer/default/train?row=0))
+- **RAG (Retrieval-Augmented Generation) System**: A vector database that consists of a carefully curated collection of academic works, which serves as a knowledge base for the LLM. This dataset provides the model with a rich source of context and reference, ensuring responses are both accurate and relevant ([Base Dataset](https://huggingface.co/datasets/somosnlp-hackathon-2022/scientific_papers_en/viewer/default/train?row=0)).
 - **Routing Approach**: Optimizes performance by directing specific types of user queries to the most suitable processing components within the application.
 
 ### Front-End Interface
