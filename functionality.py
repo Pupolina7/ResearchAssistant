@@ -10,6 +10,8 @@ import re
 from threading import Thread
 import hashlib
 import diskcache as dc
+import nltk 
+nltk.download('punkt_tab')
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, # filename="py_log.log",filemode="w",
@@ -45,39 +47,38 @@ model_cache = dc.Cache('model_cache')
 def generate_key(text):
     return hashlib.md5(text.encode()).hexdigest()
 
-# from nltk import sent_tokenize
-
-# def split_into_chunks(text, max_tokens=MAX_TOKENS):
-#     sentences = sent_tokenize(text)
-#     chunks, current = [], ""
-#     current_tokens = 0
-
-#     for sentence in sentences:
-#         sentence_tokens = len(sentence.split())
-#         if current_tokens + sentence_tokens <= max_tokens:
-#             current += sentence + ' '
-#             current_tokens += sentence_tokens
-#         else:
-#             chunks.append(current.strip())
-#             current, current_tokens = sentence + ' ', sentence_tokens
-#     if current:
-#         chunks.append(current.strip())
-#     return chunks
-
 
 def split_into_chunks(text, max_tokens=MAX_TOKENS):
-    sentences = text.split(". ")
-    chunks = []
-    current = ""
+    sentences = nltk.sent_tokenize(text)
+    chunks, current = [], ""
+    current_tokens = 0
+
     for sentence in sentences:
-        if len(current.split()) + len(sentence.split()) <= max_tokens:
-            current += sentence + '. '
+        sentence_tokens = len(sentence.split())
+        if current_tokens + sentence_tokens <= max_tokens:
+            current += sentence + ' '
+            current_tokens += sentence_tokens
         else:
             chunks.append(current.strip())
-            current = sentence + '. '
+            current, current_tokens = sentence + ' ', sentence_tokens
     if current:
         chunks.append(current.strip())
     return chunks
+
+
+# def split_into_chunks(text, max_tokens=MAX_TOKENS):
+#     sentences = text.split(". ")
+#     chunks = []
+#     current = ""
+#     for sentence in sentences:
+#         if len(current.split()) + len(sentence.split()) <= max_tokens:
+#             current += sentence + '. '
+#         else:
+#             chunks.append(current.strip())
+#             current = sentence + '. '
+#     if current:
+#         chunks.append(current.strip())
+#     return chunks
 
 def clean_text(text):
     # Remove newlines within sentences but keep paragraph breaks
@@ -133,26 +134,32 @@ def get_collection() -> chromadb.Collection:
         logging.info(f"Collection '{collection_name}' already exists!")
     return collection
 
-def fix_grammar(text: str) -> str:
+def fix_grammar(text: str):
     logging.info(f"\n---Fix Grammar input:---\n{text}")
     key = generate_key(text)
     if key in  grammar_cache:
         logging.info(f"Similar request was found in 'grammar_cache' and retrieved from it!")
-        corrected_text = grammar_cache[key]
-        logging.info(f"\n---Grammar corrected:---\n{corrected_text}\n")
-        return corrected_text
+        yield grammar_cache[key]
+
     else:
         args = TTSettings(num_beams=5, min_length=1)
-        try:
-            result = happy_tt.generate_text(f"grammar: {text}", args=args)
-            corrected_text = result.text
+        chunks = split_into_chunks(text=text, max_tokens=40)
+        corrected_text = ""
+        error_flag = False
+        for chunk in chunks:
+            try:
+                result = happy_tt.generate_text(f"grammar: {chunk}", args=args)
+                corrected_part = f"{result.text} "
+            except Exception as e:
+                error_flag = True
+                logging.error(f"Error correcting grammar: {e}")
+                corrected_part = f"{chunk} "
+            corrected_text += corrected_part
+            yield corrected_text
+
+        if not error_flag:
             grammar_cache.set(key, corrected_text, expire=86400)
             logging.info(f"The result was cached in 'grammar_cache'!")
-        except Exception as e:
-            logging.error(f"Error correcting grammar: {e}")
-            corrected_text = text
-        logging.info(f"\n---Grammar corrected:---\n{corrected_text}\n")
-        return corrected_text
 
 def fix_academic_style(informal_text: str) -> str:
     logging.info(f"\n---Fix Academic Style input:---\n{informal_text}")
@@ -162,6 +169,7 @@ def fix_academic_style(informal_text: str) -> str:
         formal_text = style_cache[key]
         logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
         return formal_text
+    
     else:
         try:
             formal_text = sf.transfer(informal_text)
@@ -234,11 +242,15 @@ def _chat_stream(initial_text: str, parts: list):
         logging.info(f"The result was cached in 'model_cache'!")
 
 def predict(goal: str, parts: list, context: str):
-        # print(f"User: {_query}")
         if goal == 'Check Academic Style':
             yield fix_academic_style(context)
         elif goal == 'Check Grammar':
-            yield fix_grammar(context)
+            full_response = ""
+            for new_text in fix_grammar(context):
+                full_response = new_text
+                yield full_response
+            
+            logging.info(f"\n---Grammar corrected:---\n{full_response}\n")
         else:
             full_response = ""
             for new_text in _chat_stream(context, parts):
@@ -246,59 +258,3 @@ def predict(goal: str, parts: list, context: str):
                 yield full_response
 
             logging.info(f"\nThe text was generated!\n{full_response}")
-
-
-# def generate_article(initial_text: str, parts: list) -> str:
-#     logging.info(f"\n---Generate Article input:---\n{initial_text}")
-#     parts = ", ".join(parts).lower()
-
-#     text_embedding = embedder.encode([initial_text])
-#     chroma_collection = get_collection()
-#     results = chroma_collection.query(
-#         query_embeddings=text_embedding,
-#         n_results=1
-#     )
-#     context = results['documents'][0] if results['documents'] else ""
-#     if context == "":
-#         logging.warning(f"COLLECTION QUERY: No context was found in the database!")
-
-#     messages = [
-#     {"role": "system", "content": """You are helpful Academic Research Assistant which helps to generate 
-#                                 necessary parts of the reserch based on the provided context.
-#                                 The context is the following: 'written text' - this is the text that user
-#                                 has for now and want to complete, 'parts' - those are the parts of paper 
-#                                 user needs to complete (it could be the abstract, introduction, methodology,
-#                                 discussion, conclusion, or full text), 'context' - the similar article 
-#                                 the structure of which can be used as a base for the text (it can be empty
-#                                 in case of absence of similar papers in the database.). The output should be
-#                                 only generated article (or parts of it). The responce must be provided as a text."""},
-#     {"role": "user", "content": f"'written text': {initial_text}\n 'parts': {parts}\n 'context': {context}"},
-#     ]
-#     text = tokenizer.apply_chat_template(
-#     messages,
-#     tokenize=False,
-#     add_generation_prompt=True
-#     )
-#     model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-#     generated_ids = model.generate(
-#         **model_inputs,
-#         max_new_tokens=512
-#     )
-#     generated_ids = [
-#         output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-#     ]
-
-#     response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
-#     logging.info("The text was generated!")
-#     return response
-    
-# def handle_user_prompt(goal: str, parts: list, context: str) -> str:
-#     if goal == 'Check Academic Style':
-#         return fix_academic_style(context)
-#     elif goal == 'Check Grammar':
-#         return fix_grammar(context)
-#     elif goal == 'Write Text (Part)':
-#         return generate_article(context, parts)
-    
-    
