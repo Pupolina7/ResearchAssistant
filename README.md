@@ -44,6 +44,7 @@ python main.py
 ## Future Enhancements
 To expand the functionality and user experience of the **AI-Powered Academic Research Assistant**, the following features are planned for future updates:
 
+- **Exclude Page Jumps**: Address the current limitations in Gradio’s handling of real-time text updates within the response generation box, reducing interruptions and improving the flow of content as it’s generated. This feature will be implemented as soon as Gradio offers an update to support it.
 - **'Stop Generation' Button**: Introduce a button that allows users to halt the text generation process mid-response, offering more control over the interaction.
 - **File Content Writing**: Enable the assistant to directly write generated or improved content into user-uploaded files, making it easier to incorporate edits without manual copy-pasting.
 - **Markdown Support**: Enhance the app’s capabilities to interpret and generate Markdown (MD) formatted content, ensuring compatibility with popular text editors and document formats.
