@@ -161,30 +161,36 @@ def fix_grammar(text: str):
             grammar_cache.set(key, corrected_text, expire=86400)
             logging.info(f"The result was cached in 'grammar_cache'!")
 
-def fix_academic_style(informal_text: str) -> str:
+def fix_academic_style(informal_text: str):
     logging.info(f"\n---Fix Academic Style input:---\n{informal_text}")
     key = generate_key(informal_text)
     if key in style_cache:
         logging.info(f"Similar request was found in 'style_cache' and retrieved from it!")
-        formal_text = style_cache[key]
-        logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
-        return formal_text
+        yield style_cache[key]
     
     else:
-        try:
-            formal_text = sf.transfer(informal_text)
-            if formal_text is None:
-                formal_text = informal_text
-                logging.warning("---COULD NOT FIX ACADEMIC STYLE!\n")
-            else:
-                style_cache.set(key, formal_text, expire=86400)
-                logging.info(f"The result was cached in 'style_cache'!")
-                logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
-        except Exception as e:
-            logging.error(f"Error in academic style transformation: {e}")
-            formal_text = informal_text
+        chunks = split_into_chunks(text=informal_text, max_tokens=25)
+        formal_text = ""
+        error_flag = False
+        for chunk in chunks:
+            try:
+                corrected_part = sf.transfer(chunk)
+                if corrected_part is None:
+                    error_flag = True
+                    corrected_part = f"{chunk} "
+                    logging.warning("---COULD NOT FIX ACADEMIC STYLE!\n")
+                else:
+                    corrected_part = f"{corrected_part} "
+            except Exception as e:
+                error_flag = True
+                logging.error(f"Error in academic style transformation: {e}")
+                corrected_part = f"{chunk} "
+            formal_text += corrected_part
+            yield formal_text
 
-        return formal_text
+        if not error_flag:
+            style_cache.set(key, formal_text, expire=86400)
+            logging.info(f"The result was cached in 'style_cache'!")
 
 def _chat_stream(initial_text: str, parts: list):
     logging.info(f"\n---Generate Article input:---\n{initial_text}")
@@ -242,9 +248,15 @@ def _chat_stream(initial_text: str, parts: list):
         logging.info(f"The result was cached in 'model_cache'!")
 
 def predict(goal: str, parts: list, context: str):
-        if goal == 'Check Academic Style':
-            yield fix_academic_style(context)
-        elif goal == 'Check Grammar':
+        if goal == 'Fix Academic Style':
+            # yield fix_academic_style(context)
+            formal_text = ""
+            for new_text in fix_academic_style(context):
+                formal_text = new_text
+                yield formal_text
+
+            logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
+        elif goal == 'Fix Grammar':
             full_response = ""
             for new_text in fix_grammar(context):
                 full_response = new_text
