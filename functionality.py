@@ -248,8 +248,10 @@ def _chat_stream(initial_text: str, parts: list):
         logging.info(f"The result was cached in 'model_cache'!")
 
 def predict(goal: str, parts: list, context: str):
-        if goal == 'Fix Academic Style':
-            # yield fix_academic_style(context)
+        if context == "":
+            yield "Write your text first!"
+            logging.info("No context was provided!")
+        elif goal == 'Fix Academic Style':
             formal_text = ""
             for new_text in fix_academic_style(context):
                 formal_text = new_text
