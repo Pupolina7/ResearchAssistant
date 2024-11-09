@@ -28,7 +28,7 @@ The front end of the application is designed for intuitive interaction, using:
 
 ## Installation and Usage
 To use the AI-Powered Academic Research Assistant you can: 
-1. **Try the application online** following the [Demo link](link) and accessing the deployed app via Hugging Face Spaces.
+1. **Try the application online** following the [Demo link](https://huggingface.co/spaces/Pupolina/Academic_Research_Assistant) and accessing the deployed app via Hugging Face Spaces.
 
 2. **Run local instance**:
 ```bash
