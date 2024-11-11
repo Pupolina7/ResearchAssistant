@@ -67,10 +67,11 @@ with gr.Blocks() as demo:
     submit_btn.click(fn=predict, 
                     inputs=[request_goal, part_to_write, input_prompt,], 
                     outputs=[responce], 
-                    scroll_to_output=True,)
+                    scroll_to_output=True, 
+                    queue=True)
     clear_btn.click(lambda: (None, None, 'Write Text (Part)', 'Abstract', None), None, 
                 outputs=[input_prompt, txt_file, request_goal, part_to_write, responce])
 
 if __name__ == "__main__":
     get_collection()
-    demo.launch()
+    demo.launch(share=True)
