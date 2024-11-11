@@ -231,7 +231,7 @@ def _chat_stream(initial_text: str, parts: list):
         )
         inputs = tokenizer([input_text], return_tensors="pt").to(model.device)
         streamer = TextIteratorStreamer(
-            tokenizer=tokenizer, skip_prompt=True, timeout=60.0, skip_special_tokens=True
+            tokenizer=tokenizer, skip_prompt=True, timeout=160.0, skip_special_tokens=True
         )
         generation_kwargs = {
             **inputs,
@@ -253,22 +253,44 @@ def predict(goal: str, parts: list, context: str):
             logging.info("No context was provided!")
         elif goal == 'Fix Academic Style':
             formal_text = ""
-            for new_text in fix_academic_style(context):
-                formal_text = new_text
-                yield formal_text
+            try:
+                for new_text in fix_academic_style(context):
+                    formal_text = new_text
+                    yield formal_text
+                if not formal_text:
+                    yield "Generation failed or timed out. Please try again!"
 
-            logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
+                logging.info(f"\n---Academic style corrected:---\n {formal_text}\n")
+            except Exception as e:
+                logging.error(f"Error in 'Fix Academic Style' occured: {e}")
+                yield "Try to wait a little bit and resend your request!"
+
         elif goal == 'Fix Grammar':
-            full_response = ""
-            for new_text in fix_grammar(context):
-                full_response = new_text
-                yield full_response
-            
-            logging.info(f"\n---Grammar corrected:---\n{full_response}\n")
-        else:
-            full_response = ""
-            for new_text in _chat_stream(context, parts):
-                full_response = new_text
-                yield full_response
+            try:
+                full_response = ""
+                for new_text in fix_grammar(context):
+                    full_response = new_text
+                    yield full_response
+                
+                if not full_response:
+                    yield "Generation failed or timed out. Please try again!"
+                
+                logging.info(f"\n---Grammar corrected:---\n{full_response}\n")
+            except Exception as e:
+                logging.error(f"Error in 'Fix Grammar' occured: {e}")
+                yield "Try to wait a little bit and resend your request!"
 
-            logging.info(f"\nThe text was generated!\n{full_response}")
+        else:
+            try:
+                full_response = ""
+                for new_text in _chat_stream(context, parts):
+                    full_response = new_text
+                    yield full_response
+                
+                if not full_response:
+                    yield "Generation failed or timed out. Please try again!"
+
+                logging.info(f"\nThe text was generated!\n{full_response}")
+            except Exception as e:
+                logging.error(f"Error in 'Write Text' occured: {e}")
+                yield "Try to wait a little bit and resend your request!"
